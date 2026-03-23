@@ -1,0 +1,27 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(npm create:*)",
+      "Bash(npm install:*)",
+      "Bash(npx tailwindcss:*)",
+      "Bash(npx tailwindcss@latest init -p)",
+      "Bash(./node_modules/.bin/tailwindcss init:*)",
+      "Bash(ls:*)",
+      "Bash(python -c \"import ast, sys, os:*)",
+      "Bash(npm run:*)",
+      "Bash(python3 -c \"import json,sys; p=json.load\\(sys.stdin\\); print\\(list\\(p.get\\(''''devDependencies'''',{}\\).keys\\(\\)\\)\\)\")",
+      "Bash(npm test:*)",
+      "Bash(curl -s http://localhost:8000/health)",
+      "Bash(curl -s -o /dev/null -w \"%{http_code}\" http://localhost:5173)",
+      "Bash(open:*)",
+      "Bash(curl -s http://localhost:8000/openapi.json)",
+      "Bash(python3 -c \"import json,sys; paths=json.load\\(sys.stdin\\)[''''paths'''']; [print\\(p\\) for p in paths]\")",
+      "Bash(curl -s http://localhost:8000/api/profiles)",
+      "Bash(curl -s http://localhost:8000/api/rubrics)",
+      "Bash(grep -l \"TODO\\\\|FIXME\\\\|HACK\\\\|XXX\" /Users/I5285/Documents/GitHub/codeprobe/backend/**/*.py)",
+      "Bash(grep -r \"TODO\\\\|FIXME\\\\|HACK\\\\|XXX\\\\|PLACEHOLDER\" /Users/I5285/Documents/GitHub/codeprobe/backend --include=*.py)",
+      "Bash(grep -r \"TODO\\\\|FIXME\\\\|HACK\\\\|XXX\\\\|placeholder\" /Users/I5285/Documents/GitHub/codeprobe/frontend/src --include=*.tsx --include=*.ts)",
+      "Bash(wc -l /Users/I5285/Documents/GitHub/codeprobe/backend/agents/agent_*.py)"
+    ]
+  }
+}
