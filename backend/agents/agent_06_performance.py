@@ -3,6 +3,7 @@ import re
 from typing import Any, Dict, List
 from .base import AgentBase
 from utils.ollama import ollama_chat, parse_llm_json
+from guardrails.schemas import PerformanceLLMOutput
 
 
 class PerformanceAgent(AgentBase):
@@ -487,8 +488,10 @@ class PerformanceAgent(AgentBase):
             parsed = parse_llm_json(response, default=None)
             if not parsed or not isinstance(parsed, dict):
                 return []
-            findings = parsed.get("findings", [])
-            return [f for f in findings if isinstance(f, dict)]
+            validated = self.validate_output(parsed, PerformanceLLMOutput, queue)
+            findings = validated.get("findings", [])
+            return [f if isinstance(f, dict) else f.model_dump() if hasattr(f, "model_dump") else {}
+                    for f in findings]
         except Exception as e:
             self.emit(queue, "progress", f"LLM performance analysis failed: {e}")
             return []

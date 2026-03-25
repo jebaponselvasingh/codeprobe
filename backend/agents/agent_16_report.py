@@ -5,6 +5,8 @@ from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
 from .base import AgentBase
 from utils.ollama import ollama_chat, parse_llm_json
+from guardrails.schemas import PriorityActionsOutput, LearningPathOutput, clamp_score
+from .graphs.report_graph import run_report_graph
 
 DEFAULT_WEIGHTS = {
     "code_quality": 0.15,
@@ -128,7 +130,7 @@ class ReportAgent(AgentBase):
             v["score"] * v["weight"]
             for v in category_scores.values()
         )
-        overall_score = round(overall_score, 2)
+        overall_score = round(clamp_score(overall_score), 2)
 
         # Add weighted field
         for cat, v in category_scores.items():
@@ -144,7 +146,12 @@ class ReportAgent(AgentBase):
         # --- Multi-pass critic: filter false positives (skip in quick mode) ---
         if not state.get("quick_mode", False):
             self.emit(queue, "progress", "Running critic pass to filter false positives...")
-            all_findings = await self._llm_critic_pass(all_findings, state, queue)
+            strictness = profile_config.get("strictness", "moderate")
+            all_findings = await run_report_graph(
+                findings=all_findings,
+                strictness=strictness,
+                queue=queue,
+            )
 
         # --- Build code heatmap ---
         code_heatmap = self._build_heatmap(all_findings)
@@ -225,63 +232,6 @@ class ReportAgent(AgentBase):
         self.emit(queue, "result", data={"overall_score": overall_score, "grade": grade})
 
         return {**state, "report": report}
-
-    async def _llm_critic_pass(
-        self, findings: List[Dict], state: Dict[str, Any], queue: asyncio.Queue
-    ) -> List[Dict]:
-        """Second LLM pass: identify and remove false positives from the findings list."""
-        if not findings:
-            return findings
-
-        # Only send errors + warnings (top 20) to keep prompt small
-        candidates = [f for f in findings if f.get("type") in ("error", "warning")][:20]
-        if not candidates:
-            return findings
-
-        profile_config = state.get("profile_config") or {}
-        strictness = profile_config.get("strictness", "moderate")
-
-        compact = json.dumps(
-            [{"i": i, "type": f.get("type"), "area": f.get("area"), "detail": f.get("detail"), "file": f.get("file")}
-             for i, f in enumerate(candidates)],
-            separators=(",", ":")
-        )[:3000]
-
-        prompt = (
-            f"You are a senior code reviewer validating automated findings.\n"
-            f"Review strictness: {strictness}.\n\n"
-            f"Below are automated findings. Mark any that are clearly false positives "
-            f"(e.g. triggered by variable names, test code, framework boilerplate) with false_positive=true.\n\n"
-            f"Findings:\n{compact}\n\n"
-            f"Return ONLY valid JSON:\n"
-            f'[{{"i": 0, "false_positive": false}}, ...]\n'
-            f"Include ALL {len(candidates)} entries in the same order."
-        )
-
-        try:
-            response = await ollama_chat(prompt, timeout=120)
-            parsed = parse_llm_json(response, default=None)
-            if not parsed or not isinstance(parsed, list) or len(parsed) < len(candidates) // 2:
-                return findings  # fallback: return unfiltered
-
-            fp_indices = {
-                item["i"]
-                for item in parsed
-                if isinstance(item, dict) and item.get("false_positive")
-            }
-            if not fp_indices:
-                return findings
-
-            # Remove false-positive candidates from the full findings list
-            candidate_originals = set(id(candidates[item["i"]]) for item in parsed if isinstance(item, dict) and item.get("false_positive") and item["i"] < len(candidates))
-            filtered = [f for f in findings if id(f) not in candidate_originals]
-            removed = len(findings) - len(filtered)
-            if removed > 0:
-                self.emit(queue, "progress", f"Critic pass removed {removed} false positive(s)")
-            return filtered
-        except Exception as e:
-            self.emit(queue, "progress", f"Critic pass failed (using original findings): {e}")
-            return findings
 
     def _compute_structure_score(self, structure_analysis: Dict) -> float:
         """Compute structure score from folder checks."""
@@ -613,7 +563,8 @@ Be specific — include exact code patterns, file names, or line references wher
             response = await ollama_chat(prompt, timeout=120)
             parsed = parse_llm_json(response, default=None)
             if parsed and isinstance(parsed, dict):
-                actions = parsed.get("actions", [])
+                validated = self.validate_output(parsed, PriorityActionsOutput, queue)
+                actions = validated.get("actions", [])
                 if actions:
                     return actions[:5]
         except Exception as e:
@@ -690,7 +641,7 @@ Return ONLY valid JSON matching exactly this structure:
             response = await ollama_chat(prompt, timeout=120)
             parsed = parse_llm_json(response, default=None)
             if parsed and isinstance(parsed, dict):
-                return parsed
+                return self.validate_output(parsed, LearningPathOutput, queue)
         except Exception as e:
             self.emit(queue, "progress", f"Learning path LLM failed: {e}")
 

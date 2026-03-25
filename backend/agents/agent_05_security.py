@@ -2,7 +2,7 @@ import asyncio
 import re
 from typing import Any, Dict, List
 from .base import AgentBase
-from utils.ollama import ollama_chat, parse_llm_json
+from .graphs.security_graph import run_security_graph
 
 OWASP_CATEGORIES = {
     "A01": "Broken Access Control",
@@ -62,9 +62,16 @@ class SecurityAgent(AgentBase):
             f"medium={severity_counts['medium']}, low={severity_counts['low']})",
         )
 
-        # --- LLM analysis ---
+        # --- LLM analysis (via LangGraph subgraph) ---
         llm_context = self.get_llm_context(state)
-        llm_findings, owasp_coverage = await self._llm_analysis(all_files, static_findings, queue, llm_context)
+        combined_content = self._build_combined_content(all_files, static_findings)
+        llm_findings, owasp_coverage = await run_security_graph(
+            all_files=all_files,
+            static_findings=static_findings,
+            queue=queue,
+            llm_context=llm_context,
+            combined_content=combined_content,
+        )
 
         # Merge and deduplicate findings
         all_findings = self._merge_findings(static_findings, llm_findings)
@@ -308,93 +315,33 @@ class SecurityAgent(AgentBase):
 
         return merged
 
-    async def _llm_analysis(
-        self, all_files: Dict[str, Any], static_findings: List[Dict], queue: asyncio.Queue, llm_context: str = ""
-    ):
-        self.emit(queue, "progress", "Running LLM security analysis on auth-related files...")
-
-        # Select auth-related files and files with existing static findings
+    def _build_combined_content(self, all_files: Dict[str, Any], static_findings: List[Dict]) -> str:
+        """Build truncated file content string for the security LangGraph subgraph."""
         flagged_files = set(f.get("file", "") for f in static_findings)
         auth_keywords = re.compile(r"auth|login|user|token|password|security|jwt|session", re.IGNORECASE)
 
-        selected = {}
-        for path, entry in all_files.items():
-            if path in flagged_files or auth_keywords.search(path):
-                selected[path] = entry
-
-        # Fall back to largest files if nothing selected
+        selected = {
+            path: entry for path, entry in all_files.items()
+            if path in flagged_files or auth_keywords.search(path)
+        }
         if not selected:
             sorted_files = sorted(all_files.items(), key=lambda x: x[1].get("size", 0), reverse=True)
-            for path, entry in sorted_files[:5]:
-                selected[path] = entry
+            selected = dict(sorted_files[:5])
 
-        # Build prompt content (truncate to ~5000 chars)
         file_sections = []
         total_chars = 0
         max_chars = 5000
-
         for path, entry in list(selected.items())[:8]:
             content = entry.get("content", "")
             header = f"\n--- {path} ---\n"
             available = max_chars - total_chars - len(header) - 100
             if available <= 0:
                 break
-            snippet = content[:available]
-            section = header + snippet
+            section = header + content[:available]
             file_sections.append(section)
             total_chars += len(section)
             if total_chars >= max_chars:
                 break
 
-        combined = "".join(file_sections)
-        if not combined.strip():
-            return [], {}
+        return "".join(file_sections)
 
-        prompt = f"""{llm_context + chr(10) + chr(10) if llm_context else ""}Review these code files for security vulnerabilities. Focus on: authentication flaws, injection points, privilege escalation, insecure data handling, and OWASP Top 10.
-
-{combined}
-
-Return ONLY valid JSON:
-{{
-  "findings": [
-    {{
-      "type": "negative",
-      "area": "security",
-      "detail": "description of vulnerability",
-      "file": "filename",
-      "line": 0,
-      "fix_hint": "how to fix",
-      "severity": "critical|high|medium|low",
-      "owasp": "A01|A02|A03|A04|A05|A06|A07|A08|A09|A10"
-    }}
-  ],
-  "additional_owasp_coverage": {{
-    "A01": "covered|partial|missing",
-    "A02": "covered|partial|missing",
-    "A03": "covered|partial|missing",
-    "A04": "covered|partial|missing",
-    "A05": "covered|partial|missing",
-    "A06": "covered|partial|missing",
-    "A07": "covered|partial|missing",
-    "A08": "covered|partial|missing",
-    "A09": "covered|partial|missing",
-    "A10": "covered|partial|missing"
-  }}
-}}"""
-
-        try:
-            response = await ollama_chat(prompt, timeout=180)
-            if not response:
-                return [], {}
-
-            parsed = parse_llm_json(response, default=None)
-            if not parsed or not isinstance(parsed, dict):
-                return [], {}
-
-            llm_findings = parsed.get("findings", [])
-            owasp_coverage = parsed.get("additional_owasp_coverage", {})
-            return llm_findings, owasp_coverage
-
-        except Exception as e:
-            self.emit(queue, "progress", f"LLM security analysis failed: {e}, using static results only")
-            return [], {}

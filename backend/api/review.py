@@ -16,6 +16,7 @@ from pydantic import BaseModel
 from database import DB_PATH, get_db
 from pipeline import run_pipeline, SESSIONS_DIR
 from utils.ollama import OLLAMA_BASE_URL, OLLAMA_MODEL
+from guardrails.sanitizer import sanitize_input_field
 
 router = APIRouter()
 
@@ -60,6 +61,11 @@ async def start_review(
 ):
     if not any([frontend_zip, backend_zip, combined_zip]):
         raise HTTPException(400, "At least one zip file is required")
+
+    # Sanitize user-supplied text fields before storing or passing downstream
+    student_name = sanitize_input_field(student_name or "", max_len=200) or None
+    project_id = sanitize_input_field(project_id or "", max_len=100) or None
+    problem_statement = sanitize_input_field(problem_statement or "", max_len=5000) or None
 
     session_id = str(uuid.uuid4())
     session_dir = SESSIONS_DIR / session_id / "uploads"

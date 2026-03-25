@@ -3,6 +3,7 @@ import re
 from typing import Any, Dict, List, Optional, Set
 from .base import AgentBase
 from utils.ollama import ollama_chat, parse_llm_json
+from guardrails.schemas import IntegrationLLMOutput, clamp_score
 
 
 class IntegrationAgent(AgentBase):
@@ -282,12 +283,9 @@ Score 0-10 based on integration completeness and API contract quality."""
             if not parsed or not isinstance(parsed, dict):
                 return None
 
-            if "score" not in parsed:
-                parsed["score"] = 5.0
-            if "findings" not in parsed:
-                parsed["findings"] = []
-
-            return parsed
+            validated = self.validate_output(parsed, IntegrationLLMOutput, queue)
+            validated["score"] = clamp_score(validated.get("score", 5.0))
+            return validated
 
         except Exception as e:
             self.emit(queue, "progress", f"LLM integration analysis failed: {e}")

@@ -3,6 +3,7 @@ import re
 from typing import Any, Dict, List, Optional
 from .base import AgentBase
 from utils.ollama import ollama_chat, parse_llm_json
+from guardrails.schemas import FastAPILLMOutput, clamp_score
 
 
 class FastAPIAgent(AgentBase):
@@ -241,17 +242,9 @@ Score range: 0-10. Focus on FastAPI-specific patterns and Python best practices.
             if not parsed or not isinstance(parsed, dict):
                 return None
 
-            # Validate/fill structure
-            if "score" not in parsed:
-                parsed["score"] = 5.0
-            if "findings" not in parsed:
-                parsed["findings"] = []
-            if "sub_scores" not in parsed:
-                parsed["sub_scores"] = {}
-            if "strengths" not in parsed:
-                parsed["strengths"] = []
-
-            return parsed
+            validated = self.validate_output(parsed, FastAPILLMOutput, queue)
+            validated["score"] = clamp_score(validated.get("score", 5.0))
+            return validated
 
         except Exception as e:
             self.emit(queue, "progress", f"LLM analysis failed: {e}, using static score only")

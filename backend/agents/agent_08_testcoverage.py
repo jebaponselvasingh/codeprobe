@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional
 from .base import AgentBase
 from utils.ollama import ollama_chat, parse_llm_json
+from guardrails.schemas import TestCoverageLLMOutput
 
 
 class TestCoverageAgent(AgentBase):
@@ -356,7 +357,7 @@ class TestCoverageAgent(AgentBase):
             parsed = parse_llm_json(response, default=None)
             if not parsed or not isinstance(parsed, dict):
                 return {}
-            return parsed
+            return self.validate_output(parsed, TestCoverageLLMOutput, queue)
         except Exception as e:
             self.emit(queue, "progress", f"LLM test coverage analysis failed: {e}")
             return {}

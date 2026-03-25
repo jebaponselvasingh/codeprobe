@@ -7,7 +7,7 @@ import tokenize
 import io
 from typing import Any, Dict, List, Optional
 from .base import AgentBase
-from utils.ollama import ollama_chat, parse_llm_json
+from .graphs.plagiarism_graph import run_plagiarism_graph
 
 BOILERPLATE_FILES = {
     "App.tsx": ["import React", "function App()", "export default App"],
@@ -133,9 +133,15 @@ class PlagiarismAgent(AgentBase):
         self.emit(queue, "progress", "Step 3/4: Counting tutorial signals...")
         static_estimate = custom_ratio * 100
 
-        # Step 4 — LLM Analysis
+        # Step 4 — LLM Analysis (via LangGraph subgraph)
         self.emit(queue, "progress", "Step 4/4: Running LLM originality analysis...")
-        llm_result = await self._llm_analysis(frontend_files, backend_files, queue)
+        llm_context = self.get_llm_context(state)
+        llm_result = await run_plagiarism_graph(
+            frontend_files=frontend_files,
+            backend_files=backend_files,
+            queue=queue,
+            llm_context=llm_context,
+        )
 
         # Scoring
         llm_estimate = llm_result.get("originality_estimate", static_estimate)
@@ -198,78 +204,6 @@ class PlagiarismAgent(AgentBase):
         self.emit(queue, "progress", f"Originality analysis complete: {originality_score}/10")
 
         return {**state, "originality_report": originality_report}
-
-    async def _llm_analysis(
-        self,
-        frontend_files: Dict[str, Any],
-        backend_files: Dict[str, Any],
-        queue: asyncio.Queue,
-    ) -> Dict:
-        """Send top files to LLM for originality assessment."""
-        # Select top 5 largest non-boilerplate frontend files
-        def file_size(item):
-            path, entry = item
-            content = entry.get("content", "") if isinstance(entry, dict) else str(entry)
-            return len(content)
-
-        def is_boilerplate(path):
-            basename = os.path.basename(path)
-            basename_no_ext = os.path.splitext(basename)[0]
-            for key in BOILERPLATE_FILES:
-                if basename == key or basename_no_ext == key or basename.startswith(key):
-                    return True
-            return False
-
-        fe_non_boilerplate = [
-            (path, entry) for path, entry in frontend_files.items()
-            if not is_boilerplate(path)
-        ]
-        fe_non_boilerplate.sort(key=file_size, reverse=True)
-        top_fe = fe_non_boilerplate[:5]
-
-        be_items = list(backend_files.items())
-        be_items.sort(key=file_size, reverse=True)
-        top_be = be_items[:3]
-
-        file_excerpts_parts = []
-        for path, entry in top_fe + top_be:
-            content = entry.get("content", "") if isinstance(entry, dict) else str(entry)
-            excerpt = content[:1500]
-            file_excerpts_parts.append(f"=== {path} ===\n{excerpt}")
-
-        file_excerpts = "\n\n".join(file_excerpts_parts)
-
-        if not file_excerpts.strip():
-            return {}
-
-        prompt = f"""Review these code files from a student project submission.
-
-Files:
-{file_excerpts}
-
-Assess:
-1. Does this appear to be mostly original student work or copy-pasted tutorials?
-2. What percentage appears original (estimate 0-100)?
-3. What tutorial patterns or boilerplate do you see?
-4. What signs of genuine effort or original implementation exist?
-
-Return JSON:
-{{
-  "originality_estimate": <0-100 integer>,
-  "assessment": "<2-3 sentence summary>",
-  "tutorial_signals": ["<signal1>"],
-  "original_elements": ["<element1>"]
-}}"""
-
-        try:
-            response = await ollama_chat(prompt, timeout=180)
-            parsed = parse_llm_json(response, default=None)
-            if parsed and isinstance(parsed, dict):
-                return parsed
-        except Exception as e:
-            self.emit(queue, "progress", f"LLM originality analysis failed: {e}")
-
-        return {}
 
     def _compute_fingerprints(self, all_files: Dict[str, Any]) -> Dict[str, str]:
         """Compute structural fingerprints for Python (.py) and JS/TS (.ts/.tsx/.js/.jsx) files."""

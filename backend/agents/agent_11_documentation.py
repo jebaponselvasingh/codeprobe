@@ -3,6 +3,7 @@ import re
 from typing import Any, Dict, List, Optional
 from .base import AgentBase
 from utils.ollama import ollama_chat, parse_llm_json
+from guardrails.schemas import DocumentationLLMOutput
 
 
 class DocumentationAgent(AgentBase):
@@ -328,7 +329,7 @@ class DocumentationAgent(AgentBase):
             parsed = parse_llm_json(response, default=None)
             if not parsed or not isinstance(parsed, dict):
                 return {}
-            return parsed
+            return self.validate_output(parsed, DocumentationLLMOutput, queue)
         except Exception as e:
             self.emit(queue, "progress", f"LLM documentation analysis failed: {e}")
             return {}

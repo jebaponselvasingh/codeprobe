@@ -21,7 +21,19 @@
       "Bash(grep -l \"TODO\\\\|FIXME\\\\|HACK\\\\|XXX\" /Users/I5285/Documents/GitHub/codeprobe/backend/**/*.py)",
       "Bash(grep -r \"TODO\\\\|FIXME\\\\|HACK\\\\|XXX\\\\|PLACEHOLDER\" /Users/I5285/Documents/GitHub/codeprobe/backend --include=*.py)",
       "Bash(grep -r \"TODO\\\\|FIXME\\\\|HACK\\\\|XXX\\\\|placeholder\" /Users/I5285/Documents/GitHub/codeprobe/frontend/src --include=*.tsx --include=*.ts)",
-      "Bash(wc -l /Users/I5285/Documents/GitHub/codeprobe/backend/agents/agent_*.py)"
+      "Bash(wc -l /Users/I5285/Documents/GitHub/codeprobe/backend/agents/agent_*.py)",
+      "WebSearch",
+      "WebFetch(domain:pypi.org)",
+      "WebFetch(domain:github.com)",
+      "WebFetch(domain:raw.githubusercontent.com)",
+      "Bash(pip install:*)",
+      "Bash(python:*)",
+      "Bash(grep -n \"self.emit\\\\|self.get_llm_context\\\\|self.validate_output\" agents/agent_*.py)",
+      "Bash(python3 -m py_compile agents/base.py agents/agent_05_security.py agents/agent_13_requirements.py agents/agent_14_plagiarism.py agents/agent_16_report.py)",
+      "Bash(grep -n \"\\\\.model_dump\\(\\)\" agents/*.py agents/graphs/*.py)",
+      "Bash(grep -n \"_cancelled_flag\\\\|_all_findings\" agents/*.py pipeline.py api/review.py)",
+      "Bash(grep:*)",
+      "Bash(python3:*)"
     ]
   }
 }

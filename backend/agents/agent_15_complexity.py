@@ -4,6 +4,7 @@ import re
 from typing import Any, Dict, List
 from .base import AgentBase
 from utils.ollama import ollama_chat, parse_llm_json
+from guardrails.schemas import ComplexityLLMOutput
 
 
 def cyclomatic_complexity(tree) -> int:
@@ -244,7 +245,8 @@ Return ONLY valid JSON:
             if not parsed or not isinstance(parsed, dict):
                 return [], []
 
-            suggestions = parsed.get("suggestions", [])
+            validated = self.validate_output(parsed, ComplexityLLMOutput, queue)
+            suggestions = validated.get("suggestions", [])
 
             # Convert suggestions to findings format for consistency
             findings = []

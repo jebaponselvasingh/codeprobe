@@ -1,4 +1,5 @@
 import logging
+import os
 import uvicorn
 from contextlib import asynccontextmanager
 from fastapi import FastAPI
@@ -10,8 +11,17 @@ from api.batch import router as batch_router
 from api.history import router as history_router
 from api.profiles import router as profiles_router
 from api.diagram import router as diagram_router
+from middleware.auth import APIKeyMiddleware
+from middleware.rate_limit import RateLimitMiddleware
 
 logging.basicConfig(level=logging.INFO)
+
+_DEFAULT_ORIGINS = "http://localhost:5173,http://localhost:3000"
+_ALLOWED_ORIGINS = [
+    o.strip()
+    for o in os.getenv("ALLOWED_ORIGINS", _DEFAULT_ORIGINS).split(",")
+    if o.strip()
+]
 
 
 @asynccontextmanager
@@ -22,9 +32,13 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(title="CodeReview Agent", version="1.0.0", lifespan=lifespan)
 
+# Security middleware (registered before CORS so rejected requests never hit CORS logic)
+app.add_middleware(RateLimitMiddleware)
+app.add_middleware(APIKeyMiddleware)
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:5173", "http://localhost:3000", "*"],
+    allow_origins=_ALLOWED_ORIGINS,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],

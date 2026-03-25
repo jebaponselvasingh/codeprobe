@@ -3,6 +3,7 @@ import re
 from typing import Any, Dict, List
 from .base import AgentBase
 from utils.ollama import ollama_chat, parse_llm_json
+from guardrails.schemas import AccessibilityLLMOutput
 
 
 # WCAG level mapping for check types
@@ -304,7 +305,7 @@ class AccessibilityAgent(AgentBase):
             parsed = parse_llm_json(response, default=None)
             if not parsed or not isinstance(parsed, dict):
                 return {}
-            return parsed
+            return self.validate_output(parsed, AccessibilityLLMOutput, queue)
         except Exception as e:
             self.emit(queue, "progress", f"LLM accessibility analysis failed: {e}")
             return {}

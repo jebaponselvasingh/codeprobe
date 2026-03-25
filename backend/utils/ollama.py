@@ -6,7 +6,7 @@ import logging
 logger = logging.getLogger(__name__)
 
 OLLAMA_BASE_URL = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434")
-OLLAMA_MODEL = os.getenv("OLLAMA_MODEL", "qwen2.5:14b")
+OLLAMA_MODEL = os.getenv("OLLAMA_MODEL", "qwen2.5:32b")
 
 
 async def ollama_chat(prompt: str, system: str = "", timeout: int = 180) -> str:

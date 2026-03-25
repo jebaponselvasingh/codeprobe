@@ -1,0 +1,8 @@
+# BMAD files
+_bmad/
+.bmad/
+*.bmad
+
+# Claude files
+.claude
+.claude/

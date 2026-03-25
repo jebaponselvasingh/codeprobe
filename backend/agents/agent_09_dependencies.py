@@ -4,6 +4,7 @@ import re
 from typing import Any, Dict, List
 from .base import AgentBase
 from utils.ollama import ollama_chat, parse_llm_json
+from guardrails.schemas import DependencyLLMOutput
 
 
 # Known problematic frontend packages
@@ -232,8 +233,10 @@ class DependencyAgent(AgentBase):
             parsed = parse_llm_json(response, default=None)
             if not parsed or not isinstance(parsed, dict):
                 return []
-            concerns = parsed.get("concerns", [])
-            return [c for c in concerns if isinstance(c, dict)]
+            validated = self.validate_output(parsed, DependencyLLMOutput, queue)
+            concerns = validated.get("concerns", [])
+            return [c if isinstance(c, dict) else c.model_dump() if hasattr(c, "model_dump") else {}
+                    for c in concerns]
         except Exception as e:
             self.emit(queue, "progress", f"LLM dependency analysis failed: {e}")
             return []

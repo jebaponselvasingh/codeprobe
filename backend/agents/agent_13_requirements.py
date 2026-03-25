@@ -3,6 +3,11 @@ import re
 from typing import Any, Dict, List, Optional
 from .base import AgentBase
 from utils.ollama import ollama_chat, parse_llm_json
+from guardrails.schemas import (
+    RequirementsParseOutput, ValidationOutput,
+    FlowTracingOutput, TestScenariosOutput, clamp_score,
+)
+from .graphs.requirements_graph import run_requirements_graph
 
 
 class RequirementsAgent(AgentBase):
@@ -26,33 +31,23 @@ class RequirementsAgent(AgentBase):
         # Combine all code for evidence search
         all_code = self._combine_code(all_files)
 
-        # Pass 1: Parse requirements from problem statement
-        self.emit(queue, "progress", "Pass 1/5: Parsing requirements from problem statement...")
-        parsed_requirements, implicit_requirements = await self._pass1_parse_requirements(
-            problem_statement, queue
+        # Run all 5 passes via LangGraph subgraph (with automatic retry on low coverage)
+        self.emit(queue, "progress", "Running requirements validation pipeline (LangGraph)...")
+        llm_context = self.get_llm_context(state)
+        graph_result = await run_requirements_graph(
+            problem_statement=problem_statement,
+            all_files=all_files,
+            all_code=all_code,
+            queue=queue,
+            llm_context=llm_context,
         )
 
-        # Pass 2: Static evidence search (no LLM)
-        self.emit(queue, "progress", "Pass 2/5: Searching code for evidence of requirements...")
-        evidence_map = self._pass2_evidence_search(parsed_requirements, all_files)
-
-        # Pass 3: LLM validates each requirement against evidence
-        self.emit(queue, "progress", "Pass 3/5: Validating requirements against evidence...")
-        validation_results = await self._pass3_validate_requirements(
-            parsed_requirements, evidence_map, all_code, queue
-        )
-
-        # Pass 4: LLM traces E2E flows
-        self.emit(queue, "progress", "Pass 4/5: Tracing end-to-end flows...")
-        flow_validations = await self._pass4_flow_tracing(
-            problem_statement, parsed_requirements, all_code, queue
-        )
-
-        # Pass 5: LLM generates test scenarios
-        self.emit(queue, "progress", "Pass 5/5: Generating test scenarios...")
-        test_scenarios = await self._pass5_test_scenarios(
-            problem_statement, parsed_requirements, validation_results, queue
-        )
+        parsed_requirements = graph_result.get("parsed_requirements", [])
+        implicit_requirements = graph_result.get("implicit_requirements", [])
+        evidence_map = graph_result.get("evidence_map", {})
+        validation_results = graph_result.get("validation_results", [])
+        flow_validations = graph_result.get("flow_validations", [])
+        test_scenarios = graph_result.get("test_scenarios", [])
 
         # Aggregate results
         summary = self._build_summary(parsed_requirements, validation_results)
@@ -122,8 +117,9 @@ Extract ALL explicit requirements stated and infer reasonable implicit requireme
             parsed = parse_llm_json(response, default=None)
 
             if parsed and isinstance(parsed, dict):
-                explicit = parsed.get("explicit_requirements", [])
-                implicit = parsed.get("implicit_requirements", [])
+                validated = self.validate_output(parsed, RequirementsParseOutput, queue)
+                explicit = validated.get("explicit_requirements", [])
+                implicit = validated.get("implicit_requirements", [])
                 return explicit, implicit
         except Exception as e:
             self.emit(queue, "progress", f"Pass 1 failed: {e}")
@@ -226,7 +222,8 @@ For each requirement, determine if it's implemented. Return ONLY valid JSON:
             parsed = parse_llm_json(response, default=None)
 
             if parsed and isinstance(parsed, dict):
-                validations = parsed.get("validations", [])
+                validated_out = self.validate_output(parsed, ValidationOutput, queue)
+                validations = validated_out.get("validations", [])
                 # Index by id for easy lookup
                 validation_by_id = {v["id"]: v for v in validations}
 
@@ -313,7 +310,8 @@ Identify 3-5 main user flows and trace them through the code. Return ONLY valid 
             parsed = parse_llm_json(response, default=None)
 
             if parsed and isinstance(parsed, dict):
-                return parsed.get("flows", [])
+                validated = self.validate_output(parsed, FlowTracingOutput, queue)
+                return validated.get("flows", [])
 
         except Exception as e:
             self.emit(queue, "progress", f"Pass 4 failed: {e}")
@@ -372,7 +370,8 @@ Generate 5-10 test scenarios covering the most important requirements."""
             parsed = parse_llm_json(response, default=None)
 
             if parsed and isinstance(parsed, dict):
-                return parsed.get("test_scenarios", [])
+                validated = self.validate_output(parsed, TestScenariosOutput, queue)
+                return validated.get("test_scenarios", [])
 
         except Exception as e:
             self.emit(queue, "progress", f"Pass 5 failed: {e}")
@@ -391,7 +390,7 @@ Generate 5-10 test scenarios covering the most important requirements."""
         # Score: fully implemented counts 1.0, partial 0.5, missing 0
         if total > 0:
             raw_score = (implemented + partial * 0.5) / total
-            score = round(raw_score * 10, 2)
+            score = round(clamp_score(raw_score * 10), 2)
         else:
             score = 5.0
 

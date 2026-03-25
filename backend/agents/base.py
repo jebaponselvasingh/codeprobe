@@ -1,6 +1,11 @@
 import asyncio
 import json
-from typing import Any, Dict, Optional
+import logging
+from typing import Any, Dict, Optional, Type
+
+from pydantic import BaseModel
+
+logger = logging.getLogger(__name__)
 
 
 class AgentBase:
@@ -41,6 +46,30 @@ class AgentBase:
             if expectations:
                 lines.append("Rubric requirements: " + "; ".join(expectations))
         return "\n".join(lines)
+
+    def validate_output(
+        self,
+        raw: dict,
+        schema_class: Type[BaseModel],
+        queue: asyncio.Queue,
+    ) -> dict:
+        """
+        Validate a parsed LLM response dict against a Pydantic schema.
+
+        - On success: returns the schema's model_dump() (normalised, typed).
+        - On failure: emits a non-fatal warning event and returns whichever
+          recognised fields are present, leaving unrecognised keys out.
+          Never raises — guardrails warn, they do not crash sessions.
+        """
+        try:
+            return schema_class(**(raw or {})).model_dump()
+        except Exception as exc:
+            msg = f"[guardrail] {self.agent_id} output schema warning: {exc}"
+            logger.warning(msg)
+            self.emit(queue, "progress", msg)
+            # Return only fields the schema knows about, with raw values
+            known_fields = schema_class.model_fields.keys()
+            return {k: v for k, v in (raw or {}).items() if k in known_fields}
 
     async def run(self, state: Dict[str, Any], queue: asyncio.Queue) -> Dict[str, Any]:
         raise NotImplementedError

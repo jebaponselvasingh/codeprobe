@@ -4,6 +4,7 @@ import re
 from typing import Any, Dict, List, Tuple
 from .base import AgentBase
 from utils.ollama import ollama_chat, parse_llm_json
+from guardrails.schemas import CodeSmellLLMOutput
 
 
 class CodeSmellAgent(AgentBase):
@@ -370,8 +371,9 @@ Return ONLY valid JSON:
             if not parsed or not isinstance(parsed, dict):
                 return [], []
 
-            findings = parsed.get("findings", [])
-            refactoring_suggestions = parsed.get("refactoring_suggestions", [])
+            validated = self.validate_output(parsed, CodeSmellLLMOutput, queue)
+            findings = validated.get("findings", [])
+            refactoring_suggestions = validated.get("refactoring_suggestions", [])
             return findings, refactoring_suggestions
 
         except Exception as e:
